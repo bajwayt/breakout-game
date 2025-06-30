@@ -22,6 +22,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   const lastTimeRef = useRef<number>(0);
   const mouseXRef = useRef<number>(width / 2);
   const ambientOscillatorRef = useRef<OscillatorNode | null>(null);
+  const touchStartXRef = useRef<number>(0);
+  const isTouchingRef = useRef<boolean>(false);
+  const lastTouchXRef = useRef<number>(0);
   
   const [gameState, setGameState] = useState<GameState>({
     score: 0,
@@ -130,25 +133,67 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     soundManager.playGameStart();
   }, [width, height, gameState.level]);
 
-  const handleMouseMove = useCallback((event: React.MouseEvent<HTMLCanvasElement>) => {
+  const updatePaddlePosition = useCallback((clientX: number) => {
     if (gameState.gameStatus !== 'playing') return;
     
     const rect = canvasRef.current?.getBoundingClientRect();
     if (rect) {
-      const mouseX = event.clientX - rect.left;
-      mouseXRef.current = mouseX;
+      const relativeX = clientX - rect.left;
+      const scaleX = width / rect.width;
+      const gameX = relativeX * scaleX;
+      
+      mouseXRef.current = gameX;
       
       setPaddle(prev => ({
         ...prev,
         position: {
           ...prev.position,
-          x: Math.max(0, Math.min(width - prev.width, mouseX - prev.width / 2))
+          x: Math.max(0, Math.min(width - prev.width, gameX - prev.width / 2))
         }
       }));
     }
   }, [gameState.gameStatus, width]);
 
-  const handleClick = useCallback(() => {
+  const handleMouseMove = useCallback((event: React.MouseEvent<HTMLCanvasElement>) => {
+    updatePaddlePosition(event.clientX);
+  }, [updatePaddlePosition]);
+
+  // Enhanced touch controls for mobile
+  const handleTouchStart = useCallback((event: React.TouchEvent<HTMLCanvasElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    
+    if (event.touches.length > 0) {
+      const touch = event.touches[0];
+      touchStartXRef.current = touch.clientX;
+      lastTouchXRef.current = touch.clientX;
+      isTouchingRef.current = true;
+      
+      // Update paddle position immediately on touch start
+      updatePaddlePosition(touch.clientX);
+    }
+  }, [updatePaddlePosition]);
+
+  const handleTouchMove = useCallback((event: React.TouchEvent<HTMLCanvasElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    
+    if (event.touches.length > 0 && isTouchingRef.current) {
+      const touch = event.touches[0];
+      lastTouchXRef.current = touch.clientX;
+      updatePaddlePosition(touch.clientX);
+    }
+  }, [updatePaddlePosition]);
+
+  const handleTouchEnd = useCallback((event: React.TouchEvent<HTMLCanvasElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    isTouchingRef.current = false;
+  }, []);
+
+  const handleClick = useCallback((event: React.MouseEvent<HTMLCanvasElement>) => {
+    event.preventDefault();
+    
     if (gameState.gameStatus === 'menu') {
       initializeGame();
     } else if (gameState.gameStatus === 'paused') {
@@ -166,6 +211,40 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       setTimeout(() => {
         initializeGame();
       }, 100);
+    }
+  }, [gameState.gameStatus, initializeGame]);
+
+  // Handle touch tap for game state changes
+  const handleTouchTap = useCallback((event: React.TouchEvent<HTMLCanvasElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    
+    // Only handle tap if it's a quick touch (not a drag)
+    const touchDuration = Date.now() - (event.timeStamp || 0);
+    const touchDistance = Math.abs(lastTouchXRef.current - touchStartXRef.current);
+    
+    if (touchDistance < 20) { // Small movement threshold
+      if (gameState.gameStatus === 'menu') {
+        initializeGame();
+      } else if (gameState.gameStatus === 'paused') {
+        setGameState(prev => ({ ...prev, gameStatus: 'playing' }));
+      } else if (gameState.gameStatus === 'gameOver') {
+        setGameState(prev => ({
+          ...prev,
+          score: 0,
+          level: 1,
+          lives: 3,
+          gameStatus: 'menu'
+        }));
+      } else if (gameState.gameStatus === 'levelComplete') {
+        setGameState(prev => ({ ...prev, level: prev.level + 1 }));
+        setTimeout(() => {
+          initializeGame();
+        }, 100);
+      } else if (gameState.gameStatus === 'playing') {
+        // Pause on tap during gameplay
+        setGameState(prev => ({ ...prev, gameStatus: 'paused' }));
+      }
     }
   }, [gameState.gameStatus, initializeGame]);
 
@@ -399,109 +478,118 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       ctx.shadowBlur = 0;
     }
 
-    // Draw UI with pixel font
+    // Draw UI with responsive font sizes
+    const isMobile = width < 600;
+    const fontSize = isMobile ? 12 : 16;
+    const topMargin = isMobile ? 25 : 35;
+    
     ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 16px "Press Start 2P", monospace';
+    ctx.font = `bold ${fontSize}px "Press Start 2P", monospace`;
     ctx.textAlign = 'left';
     ctx.shadowColor = '#00ffff';
     ctx.shadowBlur = 10;
-    ctx.fillText(`SCORE: ${gameState.score}`, 20, 35);
+    ctx.fillText(`SCORE: ${gameState.score}`, 20, topMargin);
     
     ctx.textAlign = 'center';
-    ctx.fillText(`LEVEL: ${gameState.level}`, width / 2, 35);
+    ctx.fillText(`LEVEL: ${gameState.level}`, width / 2, topMargin);
     
     ctx.textAlign = 'right';
-    ctx.fillText(`LIVES: ${gameState.lives}`, width - 20, 35);
+    ctx.fillText(`LIVES: ${gameState.lives}`, width - 20, topMargin);
     ctx.shadowBlur = 0;
 
-    // Combo multiplier with intense glow
+    // Combo multiplier with responsive sizing
     if (comboMultiplier > 1 && (gameState.gameStatus === 'playing' || gameState.gameStatus === 'paused')) {
       ctx.fillStyle = '#ffff00';
-      ctx.font = 'bold 14px "Press Start 2P", monospace';
+      ctx.font = `bold ${isMobile ? 10 : 14}px "Press Start 2P", monospace`;
       ctx.textAlign = 'center';
       ctx.shadowColor = '#ffff00';
       ctx.shadowBlur = 15;
-      ctx.fillText(`${comboMultiplier.toFixed(1)}X COMBO!`, width / 2, height - 80);
+      ctx.fillText(`${comboMultiplier.toFixed(1)}X COMBO!`, width / 2, height - (isMobile ? 60 : 80));
       ctx.shadowBlur = 0;
     }
 
-    // Game status messages with glassmorphism
+    // Game status messages with responsive sizing
     if (gameState.gameStatus === 'menu') {
       ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
       ctx.fillRect(0, 0, width, height);
       
       ctx.fillStyle = '#ffffff';
-      ctx.font = 'bold 32px "Press Start 2P", monospace';
+      ctx.font = `bold ${isMobile ? 20 : 32}px "Press Start 2P", monospace`;
       ctx.textAlign = 'center';
       ctx.shadowColor = '#00ffff';
       ctx.shadowBlur = 20;
-      ctx.fillText('BREAKOUT', width / 2, height / 2 - 60);
+      ctx.fillText('BREAKOUT', width / 2, height / 2 - (isMobile ? 40 : 60));
       
-      ctx.font = '16px "Press Start 2P", monospace';
+      ctx.font = `${isMobile ? 10 : 16}px "Press Start 2P", monospace`;
       ctx.shadowBlur = 10;
-      ctx.fillText('CLICK TO START', width / 2, height / 2 + 20);
+      ctx.fillText('TAP TO START', width / 2, height / 2 + 20);
       
-      ctx.font = '12px "Press Start 2P", monospace';
+      ctx.font = `${isMobile ? 8 : 12}px "Press Start 2P", monospace`;
       ctx.shadowBlur = 5;
-      ctx.fillText('MOVE MOUSE TO CONTROL', width / 2, height / 2 + 50);
-      ctx.fillText('SPACE TO PAUSE', width / 2, height / 2 + 70);
+      if (isMobile) {
+        ctx.fillText('TOUCH & DRAG TO CONTROL', width / 2, height / 2 + 40);
+        ctx.fillText('TAP TO PAUSE', width / 2, height / 2 + 55);
+      } else {
+        ctx.fillText('MOVE MOUSE TO CONTROL', width / 2, height / 2 + 50);
+        ctx.fillText('SPACE TO PAUSE', width / 2, height / 2 + 70);
+      }
       ctx.shadowBlur = 0;
     } else if (gameState.gameStatus === 'paused') {
       ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
       ctx.fillRect(0, 0, width, height);
       
       ctx.fillStyle = '#ffffff';
-      ctx.font = 'bold 24px "Press Start 2P", monospace';
+      ctx.font = `bold ${isMobile ? 16 : 24}px "Press Start 2P", monospace`;
       ctx.textAlign = 'center';
       ctx.shadowColor = '#ffff00';
       ctx.shadowBlur = 15;
       ctx.fillText('PAUSED', width / 2, height / 2);
       
-      ctx.font = '12px "Press Start 2P", monospace';
+      ctx.font = `${isMobile ? 8 : 12}px "Press Start 2P", monospace`;
       ctx.shadowBlur = 8;
-      ctx.fillText('SPACE OR CLICK TO RESUME', width / 2, height / 2 + 40);
+      ctx.fillText(isMobile ? 'TAP TO RESUME' : 'SPACE OR CLICK TO RESUME', width / 2, height / 2 + 40);
       ctx.shadowBlur = 0;
     } else if (gameState.gameStatus === 'gameOver') {
       ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
       ctx.fillRect(0, 0, width, height);
       
       ctx.fillStyle = '#ff0040';
-      ctx.font = 'bold 24px "Press Start 2P", monospace';
+      ctx.font = `bold ${isMobile ? 16 : 24}px "Press Start 2P", monospace`;
       ctx.textAlign = 'center';
       ctx.shadowColor = '#ff0040';
       ctx.shadowBlur = 20;
       ctx.fillText('GAME OVER', width / 2, height / 2 - 30);
       
       ctx.fillStyle = '#ffffff';
-      ctx.font = '16px "Press Start 2P", monospace';
+      ctx.font = `${isMobile ? 10 : 16}px "Press Start 2P", monospace`;
       ctx.shadowColor = '#ffffff';
       ctx.shadowBlur = 10;
       ctx.fillText(`FINAL SCORE: ${gameState.score}`, width / 2, height / 2 + 10);
       
-      ctx.font = '12px "Press Start 2P", monospace';
+      ctx.font = `${isMobile ? 8 : 12}px "Press Start 2P", monospace`;
       ctx.shadowBlur = 8;
-      ctx.fillText('CLICK TO PLAY AGAIN', width / 2, height / 2 + 50);
+      ctx.fillText('TAP TO PLAY AGAIN', width / 2, height / 2 + 50);
       ctx.shadowBlur = 0;
     } else if (gameState.gameStatus === 'levelComplete') {
       ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
       ctx.fillRect(0, 0, width, height);
       
       ctx.fillStyle = '#00ff88';
-      ctx.font = 'bold 24px "Press Start 2P", monospace';
+      ctx.font = `bold ${isMobile ? 14 : 24}px "Press Start 2P", monospace`;
       ctx.textAlign = 'center';
       ctx.shadowColor = '#00ff88';
       ctx.shadowBlur = 20;
       ctx.fillText('LEVEL COMPLETE!', width / 2, height / 2 - 30);
       
       ctx.fillStyle = '#ffffff';
-      ctx.font = '16px "Press Start 2P", monospace';
+      ctx.font = `${isMobile ? 10 : 16}px "Press Start 2P", monospace`;
       ctx.shadowColor = '#ffffff';
       ctx.shadowBlur = 10;
       ctx.fillText(`NEXT LEVEL: ${gameState.level + 1}`, width / 2, height / 2 + 10);
       
-      ctx.font = '12px "Press Start 2P", monospace';
+      ctx.font = `${isMobile ? 8 : 12}px "Press Start 2P", monospace`;
       ctx.shadowBlur = 8;
-      ctx.fillText('CLICK TO CONTINUE', width / 2, height / 2 + 50);
+      ctx.fillText('TAP TO CONTINUE', width / 2, height / 2 + 50);
       ctx.shadowBlur = 0;
     }
   });
@@ -513,9 +601,16 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       height={height}
       onMouseMove={handleMouseMove}
       onClick={handleClick}
-      className="border border-white/20 rounded-2xl cursor-crosshair backdrop-blur-sm bg-black/50"
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchTap}
+      className="border border-white/20 rounded-2xl cursor-crosshair backdrop-blur-sm bg-black/50 touch-none select-none"
       style={{ 
-        boxShadow: '0 0 60px rgba(0, 255, 255, 0.3), inset 0 0 60px rgba(0, 255, 255, 0.1)'
+        boxShadow: '0 0 60px rgba(0, 255, 255, 0.3), inset 0 0 60px rgba(0, 255, 255, 0.1)',
+        touchAction: 'none',
+        userSelect: 'none',
+        WebkitUserSelect: 'none',
+        WebkitTouchCallout: 'none'
       }}
     />
   );

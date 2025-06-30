@@ -2,11 +2,12 @@ import { Block, Particle, Position } from '../types/game';
 
 export const createBlocks = (canvasWidth: number, level: number): Block[] => {
   const blocks: Block[] = [];
-  const blockWidth = 60;  // Smaller blocks
-  const blockHeight = 25; // Smaller blocks
-  const padding = 4;
-  const rows = Math.min(6 + Math.floor(level / 2), 8);
-  const cols = Math.floor((canvasWidth - 40) / (blockWidth + padding));
+  const isMobile = canvasWidth < 600;
+  const blockWidth = isMobile ? 45 : 60;  // Smaller blocks for mobile
+  const blockHeight = isMobile ? 20 : 25; // Smaller blocks for mobile
+  const padding = isMobile ? 3 : 4;
+  const rows = Math.min(6 + Math.floor(level / 2), isMobile ? 6 : 8);
+  const cols = Math.floor((canvasWidth - (isMobile ? 20 : 40)) / (blockWidth + padding));
   const startX = (canvasWidth - (cols * (blockWidth + padding) - padding)) / 2;
   
   const colors = [
@@ -22,7 +23,7 @@ export const createBlocks = (canvasWidth: number, level: number): Block[] => {
         id: `${row}-${col}`,
         position: {
           x: startX + col * (blockWidth + padding),
-          y: 80 + row * (blockHeight + padding)
+          y: (isMobile ? 60 : 80) + row * (blockHeight + padding)
         },
         width: blockWidth,
         height: blockHeight,
