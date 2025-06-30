@@ -24,7 +24,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   const ambientOscillatorRef = useRef<OscillatorNode | null>(null);
   const touchStartXRef = useRef<number>(0);
   const isTouchingRef = useRef<boolean>(false);
-  const lastTouchXRef = useRef<number>(0);
+  const lastTouchTimeRef = useRef<number>(0);
   
   const [gameState, setGameState] = useState<GameState>({
     score: 0,
@@ -165,14 +165,36 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     
     if (event.touches.length > 0) {
       const touch = event.touches[0];
-      touchStartXRef.current = touch.clientX;
-      lastTouchXRef.current = touch.clientX;
-      isTouchingRef.current = true;
+      const currentTime = Date.now();
       
-      // Update paddle position immediately on touch start
+      touchStartXRef.current = touch.clientX;
+      isTouchingRef.current = true;
+      lastTouchTimeRef.current = currentTime;
+      
+      // Update paddle position immediately on touch
       updatePaddlePosition(touch.clientX);
+      
+      // Handle game state changes with touch
+      if (gameState.gameStatus === 'menu') {
+        initializeGame();
+      } else if (gameState.gameStatus === 'paused') {
+        setGameState(prev => ({ ...prev, gameStatus: 'playing' }));
+      } else if (gameState.gameStatus === 'gameOver') {
+        setGameState(prev => ({
+          ...prev,
+          score: 0,
+          level: 1,
+          lives: 3,
+          gameStatus: 'menu'
+        }));
+      } else if (gameState.gameStatus === 'levelComplete') {
+        setGameState(prev => ({ ...prev, level: prev.level + 1 }));
+        setTimeout(() => {
+          initializeGame();
+        }, 100);
+      }
     }
-  }, [updatePaddlePosition]);
+  }, [updatePaddlePosition, gameState.gameStatus, initializeGame]);
 
   const handleTouchMove = useCallback((event: React.TouchEvent<HTMLCanvasElement>) => {
     event.preventDefault();
@@ -180,7 +202,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     
     if (event.touches.length > 0 && isTouchingRef.current) {
       const touch = event.touches[0];
-      lastTouchXRef.current = touch.clientX;
       updatePaddlePosition(touch.clientX);
     }
   }, [updatePaddlePosition]);
@@ -188,11 +209,22 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   const handleTouchEnd = useCallback((event: React.TouchEvent<HTMLCanvasElement>) => {
     event.preventDefault();
     event.stopPropagation();
+    
     isTouchingRef.current = false;
-  }, []);
+    
+    // Handle pause/resume with quick tap (if not dragging)
+    const currentTime = Date.now();
+    const touchDuration = currentTime - lastTouchTimeRef.current;
+    
+    if (touchDuration < 200 && gameState.gameStatus === 'playing') {
+      // Quick tap to pause
+      setGameState(prev => ({ ...prev, gameStatus: 'paused' }));
+    }
+  }, [gameState.gameStatus]);
 
   const handleClick = useCallback((event: React.MouseEvent<HTMLCanvasElement>) => {
-    event.preventDefault();
+    // Only handle mouse clicks on non-touch devices
+    if ('ontouchstart' in window) return;
     
     if (gameState.gameStatus === 'menu') {
       initializeGame();
@@ -211,40 +243,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       setTimeout(() => {
         initializeGame();
       }, 100);
-    }
-  }, [gameState.gameStatus, initializeGame]);
-
-  // Handle touch tap for game state changes
-  const handleTouchTap = useCallback((event: React.TouchEvent<HTMLCanvasElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-    
-    // Only handle tap if it's a quick touch (not a drag)
-    const touchDuration = Date.now() - (event.timeStamp || 0);
-    const touchDistance = Math.abs(lastTouchXRef.current - touchStartXRef.current);
-    
-    if (touchDistance < 20) { // Small movement threshold
-      if (gameState.gameStatus === 'menu') {
-        initializeGame();
-      } else if (gameState.gameStatus === 'paused') {
-        setGameState(prev => ({ ...prev, gameStatus: 'playing' }));
-      } else if (gameState.gameStatus === 'gameOver') {
-        setGameState(prev => ({
-          ...prev,
-          score: 0,
-          level: 1,
-          lives: 3,
-          gameStatus: 'menu'
-        }));
-      } else if (gameState.gameStatus === 'levelComplete') {
-        setGameState(prev => ({ ...prev, level: prev.level + 1 }));
-        setTimeout(() => {
-          initializeGame();
-        }, 100);
-      } else if (gameState.gameStatus === 'playing') {
-        // Pause on tap during gameplay
-        setGameState(prev => ({ ...prev, gameStatus: 'paused' }));
-      }
     }
   }, [gameState.gameStatus, initializeGame]);
 
@@ -528,7 +526,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       ctx.shadowBlur = 5;
       if (isMobile) {
         ctx.fillText('TOUCH & DRAG TO CONTROL', width / 2, height / 2 + 40);
-        ctx.fillText('TAP TO PAUSE', width / 2, height / 2 + 55);
+        ctx.fillText('QUICK TAP TO PAUSE', width / 2, height / 2 + 55);
       } else {
         ctx.fillText('MOVE MOUSE TO CONTROL', width / 2, height / 2 + 50);
         ctx.fillText('SPACE TO PAUSE', width / 2, height / 2 + 70);
@@ -603,7 +601,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       onClick={handleClick}
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
-      onTouchEnd={handleTouchTap}
+      onTouchEnd={handleTouchEnd}
       className="border border-white/20 rounded-2xl cursor-crosshair backdrop-blur-sm bg-black/50 touch-none select-none"
       style={{ 
         boxShadow: '0 0 60px rgba(0, 255, 255, 0.3), inset 0 0 60px rgba(0, 255, 255, 0.1)',
